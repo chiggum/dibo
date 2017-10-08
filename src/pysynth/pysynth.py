@@ -330,11 +330,11 @@ def make_wav_f(fn, intensity_list_list):
 	f.setframerate(44100)
 	f.setcomptype('NONE','Not Compressed')
 
-	ow = b''
 	for intensity_list in intensity_list_list:
+		ow = b''
 		for x in intensity_list:
 			ow = ow + sixteenbit(x)
-	f.writeframesraw(ow)
+		f.writeframesraw(ow)
 	f.writeframes(b'')
 	f.close()
 ##########################################################################
