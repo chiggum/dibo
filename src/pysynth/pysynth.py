@@ -200,6 +200,143 @@ def make_wav(song,bpm=120,transpose=0,pause=.05,boost=1.1,repeat=0,fn="out.wav",
 	else:
 		return f
 
+##################################
+# make_wav parallel utils
+##################################
+def make_wav_par_util(song,bpm=120,transpose=0,pause=.05,boost=1.1,repeat=0,superimpose=False, silent=False):
+	if superimpose:
+		last_ts = None
+		for nn, x in enumerate(song):
+			if last_ts is None:
+				last_ts = x[1]
+			else:
+				assert last_ts==x[1], "time in every (note,time) must be same when superimpose is True."
+
+	bpmfac = 120./bpm
+
+	def length(l):
+		return 88200./l*bpmfac
+
+	def waves2(hz,l):
+		a=44100./hz
+		b=float(l)/44100.*hz
+		return [a,round(b)]
+
+	def sixteenbit(x):
+		return struct.pack('h', round(32000*x))
+
+	def asin(x):
+		return math.sin(2.*math.pi*x)
+
+	def render2(a,b,vol,glob_intensity_list=None):
+		b2 = (1.-pause)*b
+		l=waves2(a,b2)
+		ow=b''
+		q=int(l[0]*l[1])
+
+		# harmonics are frequency-dependent:
+		lf = math.log(a)
+		lf_fac = (lf-3.) / harm_max
+		if lf_fac > 1: harm = 0
+		else: harm = 2. * (1-lf_fac)
+		decay = 2. / lf
+		t = (lf-3.) / (8.5-3.)
+		volfac = 1. + .8 * t * math.cos(math.pi/5.3*(lf-3.))
+
+		intensity_list = []
+
+		for x in range(q):
+			fac=1.
+			if x<100: fac=x/80.
+			if 100<=x<300: fac=1.25-(x-100)/800.
+			if x>q-400: fac=1.-((x-q+400)/400.)
+			s = float(x)/float(q)
+			dfac =  1. - s + s * decay
+			my_intensity = (asin(float(x)/l[0])
+				+harm*asin(float(x)/(l[0]/2.))
+				+.5*harm*asin(float(x)/(l[0]/4.)))/4.*fac*vol*dfac*volfac
+			intensity_list.append(my_intensity)
+		fill = max(int(ex_pos - curpos - q), 0)
+		
+		for x in range(fill):
+			intensity_list.append(0)
+		
+		if not superimpose:
+			if glob_intensity_list is None:
+				glob_intensity_list = intensity_list
+			else:
+				glob_intensity_list += intensity_list
+		else:
+			if glob_intensity_list is None:
+				glob_intensity_list = intensity_list
+			else:
+				for x in range(q+fill):
+					glob_intensity_list[x] += intensity_list[x]
+		return q + fill,glob_intensity_list
+
+	##########################################################################
+	# Write to output file (in WAV format)
+	##########################################################################
+	curpos = 0
+	ex_pos = 0.
+	glob_intensity_list = None
+	for rp in range(repeat+1):
+		for nn, x in enumerate(song):
+			# if not nn % 4 and silent == False:
+			# 	print("[%u/%u]\t" % (nn+1,len(song)))
+			if x[0]!='r':
+				if x[0][-1] == '*':
+					vol = boost
+					note = x[0][:-1]
+				else:
+					vol = 1.
+					note = x[0]
+				try:
+					a=pitchhz[note]
+				except:
+					a=pitchhz[note + '4']	# default to fourth octave
+				a = a * 2**transpose
+				if x[1] < 0:
+					b=length(-2.*x[1]/3.)
+				else:
+					b=length(x[1])
+				ex_pos = ex_pos + b
+				curpos_add, glob_intensity_list = render2(a,b,vol,glob_intensity_list)
+				curpos = curpos + curpos_add
+
+			if x[0]=='r':
+				b=length(x[1])
+				ex_pos = ex_pos + b
+				glob_intensity_list += [0]*int(b)
+				curpos = curpos + int(b)
+
+	if superimpose:
+		assert len(glob_intensity_list) == int(b)
+		for x in range(int(b)):
+			glob_intensity_list[x] /= (1.0*len(song))
+
+	return glob_intensity_list
+
+def make_wav_par(song_, superimpose_):
+	return make_wav_par_util(song=song_, superimpose=superimpose_)
+
+def make_wav_f(fn, intensity_list_list):
+	def sixteenbit(x):
+		return struct.pack('h', round(32000*x))
+	
+	f=wave.open(fn,'w')
+	f.setnchannels(1)
+	f.setsampwidth(2)
+	f.setframerate(44100)
+	f.setcomptype('NONE','Not Compressed')
+
+	ow = b''
+	for intensity_list in intensity_list_list:
+		for x in intensity_list:
+			ow = ow + sixteenbit(x)
+	f.writeframesraw(ow)
+	f.writeframes(b'')
+	f.close()
 ##########################################################################
 # Synthesize demo songs
 ##########################################################################
