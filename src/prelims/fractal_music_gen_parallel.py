@@ -345,8 +345,8 @@ if __name__=="__main__":
         elif c == ord('i'):
             offMul*=10
         elif c == ord('r'):
-            # create and play music
             h_mat_ = h_mat.reshape((H,W,3))
+            # make audio
             gs_mat = (.2126 * h_mat_[:,:,0] + .7152 * h_mat_[:,:,0] + .0722 * h_mat_[:,:,0]).astype(np.uint8)
             min_gs = np.min(gs_mat, axis=1).reshape((H,1))
             gs_mat -= min_gs
@@ -379,5 +379,16 @@ if __name__=="__main__":
             print("intensity lists prepared")
             print("Took", time.time()-t)
             t = time.time()
-            make_wav_f("fractal_song_par.wav", intensity_list_list)
+            make_wav_f("fractal_song_par_aud.wav", intensity_list_list)
             print("Took", time.time()-t)
+
+            # make video
+            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+            out = cv2.VideoWriter('fractal_son_par_vid.avi',fourcc, 4.0, (W,H))
+            for j in range(W):
+                frame = h_mat_.copy()
+                frame[:,j,:] = 255 - frame[:,j,:]
+                out.write(frame)
+            out.release()
+
+            ## Use ffmpeg.exe -i audio_file -i video_file -c copy output.mkv
