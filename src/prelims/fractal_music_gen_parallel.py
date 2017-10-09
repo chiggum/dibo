@@ -5,8 +5,67 @@ import time
 import multiprocessing
 from pysynth import make_wav_par, make_wav_f
 import subprocess
-import os
+import os, sys
 import matplotlib.cm as cm
+
+from PyQt5 import QtCore, QtWidgets, QtGui
+
+class ColorDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.widget = QtWidgets.QColorDialog()
+        self.widget.setWindowFlags(QtCore.Qt.Widget)
+        self.widget.setOptions(
+            QtWidgets.QColorDialog.DontUseNativeDialog |
+            QtWidgets.QColorDialog.NoButtons)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.widget)
+    def customCount(self):
+        return self.widget.customCount()
+    def setCustomColor(self,ind,r,g,b):
+        self.widget.setCustomColor(ind,QtGui.QColor(r,g,b))
+    def customColor(self, ind):
+        mycol = self.widget.customColor(ind)
+        return (mycol.red(), mycol.green(), mycol.blue())
+
+app = QtWidgets.QApplication(sys.argv)
+dialog = ColorDialog()
+dialog.show()
+
+vtoc = {}
+cmap_sz = dialog.customCount()
+iscmap_formed = False
+
+def form_cmap(vals):
+    vals = np.sort(vals)
+    L = vals.shape[0]
+    N = np.min([vals.shape[0], cmap_sz])
+    vtoc[0.] = 0
+    vtoc[1.] = N-1
+    assert N > 1, "No. of fracs must be greater than 1."
+    r_,g_,b_,a_ = cm.jet(0)
+    dialog.setCustomColor(0,int(255*r_),int(255*g_),int(255*b_))
+    r_,g_,b_,a_ = cm.jet(1)
+    dialog.setCustomColor(N-1,int(255*r_),int(255*g_),int(255*b_))
+    if N == 2:
+        print("Only two different values found.")
+    else:
+        for i in range(1, N-1):
+            frac = (1.0*i*(L-1))/(N-1)
+            myclr = (frac/(L-1))
+            r_,g_,b_,a_ = cm.jet(myclr)
+            vtoc[vals[int(frac)]] = i
+            dialog.setCustomColor(i,int(255*r_),int(255*g_),int(255*b_))
+
+def get_customcolor_ind(val, vtoc_keys):
+    i = len(vtoc_keys)
+    while i > 0:
+        if vtoc_keys[i-1] > val:
+            i = i-1
+        else:
+            break
+    return vtoc_keys[i-1]
+
 
 def sym_icon_f(x,y,lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree):
     zzbar = x**2+y**2
@@ -55,16 +114,30 @@ def get_param(category):
         return -2.7,5.0,1.5,1.0,0.0,0.0,6,0
     elif category == 3:
         return 2.5,-2.5,0,0.9,0,0,3,0
+    elif category == 4:
+        return 2.409,-2.5,0.0,0.9,0.0,0.0,23,0
+    elif category == 5:
+        return 2.5,-2.5,0.0,0.9,0.0,0.0,3,0
+    elif category == 6:
+        return 1.5,-1.0,-0.2,-0.75,0.04,0.0,3,24
+    elif category == 7:
+        return -2.05,3.0,-16.79,1.0,0.0,0.0,9,0
     return -2.08,1.0,-0.1,0.167,0.0,0.0,7,0
 
 def get_img(hits, maxHits, H, W):
+    global iscmap_formed
+    if not iscmap_formed:
+        form_cmap(np.power(0.45,(1.0*hits.flatten())/maxHits))
+        iscmap_formed = True
     img = np.zeros((H,W,3),dtype=np.uint8)
+    vtoc_keys = list(vtoc.keys())
     for i in range(H):
         for j in range(W):
-            img[i,j,:] = np.min([1000*(1.0*hits[i,j])/maxHits,255])
+            r_,g_,b_ = dialog.customColor(vtoc[get_customcolor_ind(np.power(0.45,(1.0*hits[i,j])/maxHits), vtoc_keys)])
+            img[i,j,:] = (r_,g_,b_)
     return img
 
-def iterate_and_get_img(x_init,y_init,category,
+def iterate(x_init,y_init,category,
             scaleH, scaleW, H, W, n_iter):
     lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree = get_param(category)
     hits = np.zeros((H,W))
@@ -80,7 +153,7 @@ def iterate_and_get_img(x_init,y_init,category,
             hits[yp,xp] += 1
             if hits[yp,xp] > maxHits:
                 maxHits = hits[yp,xp]
-    return get_img(hits, maxHits, H, W)
+    return (hits, maxHits)
 
 if __name__=="__main__":
     all_notes = ['c1', 'c#1', 'd1', 'd#1', 'e1', 'f1', 'f#1', 'g1', 'g#1', 
@@ -111,7 +184,7 @@ if __name__=="__main__":
                             default="G:/packages/ffmpeg/bin/ffmpeg.exe")
         parser.add_argument('-ni', '--n_iter', type=int,
                             help="No. of iterations.",
-                            default=100000)
+                            default=500000)
         parser.add_argument('-sh', '--scaleH', type=float,
                             help="scaleH.",
                             default=0.37)
@@ -141,9 +214,32 @@ if __name__=="__main__":
     x_init = args.x_init
     y_init = args.y_init
     
+    np.random.seed(2)
+    N = 16
+    myargs = []
+    for i in range(N):
+        x_init_ = x_init + np.random.normal(0,0.1)
+        y_init_ = y_init + np.random.normal(0,0.1)
+        print(x_init_,y_init_)
+        myargs.append((x_init_, y_init_, category,
+                        scaleH, scaleW, H, W, n_iter))
+    
+    with multiprocessing.Pool(processes=N) as pool:
+        hits_maxhits_list = pool.starmap(iterate, myargs)
+    
+    hits_list = []
+    maxhits_list = []
+    maxHits = 0
+    for h_,m_ in hits_maxhits_list:
+        hits_list.append(h_)
+        maxhits_list.append(m_)
+        maxHits += m_
+    hits = hits_list[0]*maxhits_list[0]
+    for i in range(1,N):
+        hits += hits_list[i]*maxhits_list[i]
+
     while True:
-        h_mat = iterate_and_get_img(x_init, y_init, category,
-                                    scaleH, scaleW, H, W, n_iter)
+        h_mat = get_img(hits, maxHits, H, W)
         cv2.imshow("fractal", h_mat.reshape((H,W,3)))
         c = cv2.waitKey(0)
         if c == ord('f'):
