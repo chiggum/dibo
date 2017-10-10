@@ -102,12 +102,26 @@ def sym_icon_f(x,y,lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree):
     a = lmbda + alpha*zzbar + beta*x1 + delta*x4*zzbarsqrt
     return (a*x-omega*y+gamma*xbar1,a*y+omega*x+gamma*ybar1)
 
-def hit_pixel(x, y, scaleH, scaleW, H, W):
-    xp = np.uint(x*scaleW*W + W/2.0 + 0.5)
-    yp = np.uint(y*scaleH*H + H/2.0 + 0.5)
-    return (xp,yp)
+def quilt_f(x,y,lmbda,alpha,beta,gamma,omega,m,v_x,v_y):
+    x1 = m*x + v_x + lmbda*np.sin(2*np.pi*x) + alpha*np.sin(2*np.pi*x)*np.cos(2*np.pi*y) + beta*np.sin(4*np.pi*x)+gamma*np.sin(6*np.pi*x)*np.cos(4*np.pi*y)
+    y1 = m*y + v_y + lmbda*np.sin(2*np.pi*y) + alpha*np.sin(2*np.pi*y)*np.cos(2*np.pi*x) + beta*np.sin(4*np.pi*y)+gamma*np.sin(6*np.pi*y)*np.cos(4*np.pi*x)
+    x1 = np.modf(x1)[0]
+    x1 = np.modf(x1+1)[0]
+    y1 = np.modf(y1)[0]
+    y1 = np.modf(y1+1)[0]
+    return (x1,y1)
 
-def get_param(category):
+def hit_pixel(x, y, scaleH, scaleW, H, W, p_H, p_W, which=1):
+    if which == 1:
+        xp = np.uint(x*scaleW*W + W/2.0 + 0.5)
+        yp = np.uint(y*scaleH*H + H/2.0 + 0.5)
+        return (xp,yp)
+    elif which == 2:
+        xp = np.uint(x*p_W + 0.5)
+        yp = np.uint(y*p_H + 0.5)
+        return (xp,yp)
+
+def get_param_icon(category):
     if category == 1:
         return -2.08,1.0,-0.1,0.167,0.0,0.0,7,0
     elif category == 2:
@@ -124,32 +138,54 @@ def get_param(category):
         return -2.05,3.0,-16.79,1.0,0.0,0.0,9,0
     return -2.08,1.0,-0.1,0.167,0.0,0.0,7,0
 
-def get_img(hits, maxHits, H, W):
+def get_param_quilt(category):
+    if category == 1:
+        return -0.2,-0.1,0.1,-0.25,0.0,0,0,0
+    elif category == 2:
+        return -0.59,0.2,0.1,-0.33,0.0,2,0,0
+
+def get_img(hits, maxHits, H, W, p_H, p_W, which=1):
     global iscmap_formed
     if not iscmap_formed:
         form_cmap(np.power(0.45,(1.0*hits.flatten())/maxHits))
         iscmap_formed = True
     img = np.zeros((H,W,3),dtype=np.uint8)
+    p_img = np.zeros((p_H,p_W,3),dtype=np.uint8)
     vtoc_keys = list(vtoc.keys())
-    for i in range(H):
-        for j in range(W):
-            r_,g_,b_ = dialog.customColor(vtoc[get_customcolor_ind(np.power(0.45,(1.0*hits[i,j])/maxHits), vtoc_keys)])
-            img[i,j,:] = (r_,g_,b_)
+    if which==1:
+        for i in range(H):
+            for j in range(W):
+                r_,g_,b_ = dialog.customColor(vtoc[get_customcolor_ind(np.power(0.45,(1.0*hits[i,j])/maxHits), vtoc_keys)])
+                img[i,j,:] = (r_,g_,b_)
+    elif which==2:
+        for i in range(p_H):
+            for j in range(p_W):
+                r_,g_,b_ = dialog.customColor(vtoc[get_customcolor_ind(np.power(0.45,(1.0*hits[i,j])/maxHits), vtoc_keys)])
+                p_img[i,j,:] = (r_,g_,b_)
+        for i in range(int(H/p_H)):
+            for j in range(int(W/p_W)):
+                img[(p_H*i):(p_H*(i+1)),(p_W*j):(p_W*(j+1)),:] = p_img
     return img
 
 def iterate(x_init,y_init,category,
-            scaleH, scaleW, H, W, n_iter):
-    lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree = get_param(category)
+            scaleH, scaleW, H, W, p_H, p_W, n_iter, which=1):
+    if which == 1:
+        lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree = get_param_icon(category)
+    elif which == 2:
+        lmbda,alpha,beta,gamma,omega,m,v_x,v_y = get_param_quilt(category)
     hits = np.zeros((H,W))
     maxHits = 1
     x_hit = x_init
     y_hit = y_init
     for it in range(n_iter):
-        (x_hit, y_hit) = sym_icon_f(x_hit,y_hit,lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree)
+        if which == 1:
+            (x_hit, y_hit) = sym_icon_f(x_hit,y_hit,lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree)
+        elif which == 2:
+            (x_hit, y_hit) = quilt_f(x_hit,y_hit,lmbda,alpha,beta,gamma,omega,m,v_x,v_y)
         #print(x_hit,y_hit)
-        (xp,yp) = hit_pixel(x_hit, y_hit, scaleH, scaleW, H, W)
+        (xp,yp) = hit_pixel(x_hit, y_hit, scaleH, scaleW, H, W, p_H, p_W, which)
         #print(xp,yp)
-        if xp < W and yp < H:
+        if (which == 1 and xp < W and yp < H) or (which==2 and xp < p_W and yp < p_H):
             hits[yp,xp] += 1
             if hits[yp,xp] > maxHits:
                 maxHits = hits[yp,xp]
@@ -176,8 +212,17 @@ if __name__=="__main__":
         parser.add_argument('-width', '--width', type=int,
                             help="Width of image.",
                             required=True)
+        parser.add_argument('-ph', '--patch_height', type=int,
+                            help="Height of a patch",
+                            default=30)
+        parser.add_argument('-pw', '--patch_width', type=int,
+                            help="Width of a patch.",
+                            default=30)
         parser.add_argument('-c', '--category', type=int,
                             help="Category of set.",
+                            default=1)
+        parser.add_argument('-wh', '--which', type=int,
+                            help="icon[1]/quit[2]",
                             default=1)
         parser.add_argument('-f', '--ffmpeg_exe_path', type=str,
                             help="Category of set.",
@@ -213,19 +258,31 @@ if __name__=="__main__":
     n_iter = args.n_iter
     x_init = args.x_init
     y_init = args.y_init
+    which = args.which
+    p_H = args.patch_height
+    p_W = args.patch_width
     
     np.random.seed(2)
     N = 16
     myargs = []
     for i in range(N):
-        x_init_ = x_init + np.random.normal(0,0.1)
-        y_init_ = y_init + np.random.normal(0,0.1)
+        if which==1:
+            x_init_ = x_init + np.random.normal(0,0.1)
+            y_init_ = y_init + np.random.normal(0,0.1)
+        elif which==2:
+            x_init_ = np.random.normal(0,1)
+            y_init_ = np.random.normal(0,1)
+            x_init_ = np.modf(1+np.modf(x_init_)[0])[0]
+            y_init_ = np.modf(1+np.modf(y_init_)[0])[0]
         print(x_init_,y_init_)
         myargs.append((x_init_, y_init_, category,
-                        scaleH, scaleW, H, W, n_iter))
+                        scaleH, scaleW, H, W, p_H, p_W, n_iter, which))
     
     with multiprocessing.Pool(processes=N) as pool:
         hits_maxhits_list = pool.starmap(iterate, myargs)
+    # hits_,maxHits_ = iterate(x_init, y_init, category,
+    #                     scaleH, scaleW, H, W, n_iter, which)
+    # hits_maxhits_list = [(hits_,maxHits_)]
     
     hits_list = []
     maxhits_list = []
@@ -239,7 +296,7 @@ if __name__=="__main__":
         hits += hits_list[i]*maxhits_list[i]
 
     while True:
-        h_mat = get_img(hits, maxHits, H, W)
+        h_mat = get_img(hits, maxHits, H, W, p_H, p_W, which)
         cv2.imshow("fractal", h_mat.reshape((H,W,3)))
         c = cv2.waitKey(0)
         if c == ord('f'):
@@ -305,7 +362,7 @@ if __name__=="__main__":
             print("intensity lists prepared")
             print("Took", time.time()-t)
             t = time.time()
-            fname = str(args.category) +  "_" + time.strftime("%d_%H_%M")
+            fname = str(args.category) + "_" + str(args.which) +  "_" + time.strftime("%d_%H_%M")
             make_wav_f(fname + ".wav", intensity_list_list)
             print("Took", time.time()-t)
 
