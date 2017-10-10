@@ -16,3 +16,4 @@ A web app which converts images to audio.
 - Parallelize or improve time complexity of make_wav. [Done]
 - Mapping from an arbitrary-length array of integers to another fixed-length array of fixed-integers.
 - Make video of fractal music. [Done]
+- Automatically generate a cmap that can best represent the icons/quilts.
