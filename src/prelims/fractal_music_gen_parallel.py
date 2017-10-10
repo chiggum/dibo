@@ -7,6 +7,7 @@ from pysynth import make_wav_par, make_wav_f
 import subprocess
 import os, sys
 import matplotlib.cm as cm
+import matplotlib.pyplot as plt
 
 from PyQt5 import QtCore, QtWidgets, QtGui
 
@@ -37,15 +38,22 @@ cmap_sz = dialog.customCount()
 iscmap_formed = False
 
 def form_cmap(vals):
-    vals = np.sort(vals)
+    # plt.hist(vals,bins=100)
+    # plt.show()
+    print("prev:",vals.shape[0])
+    vals = np.sort(np.unique(vals))
     L = vals.shape[0]
-    N = np.min([vals.shape[0], cmap_sz])
+    print("next:",L)
+    # plt.hist(vals,bins=100)
+    # plt.show()
+
+    N = np.min([L, cmap_sz])
     vtoc[0.] = 0
     vtoc[1.] = N-1
     assert N > 1, "No. of fracs must be greater than 1."
-    r_,g_,b_,a_ = cm.jet(0)
+    r_,g_,b_,a_ = cm.viridis(0)
     dialog.setCustomColor(0,int(255*r_),int(255*g_),int(255*b_))
-    r_,g_,b_,a_ = cm.jet(1)
+    r_,g_,b_,a_ = cm.viridis(1)
     dialog.setCustomColor(N-1,int(255*r_),int(255*g_),int(255*b_))
     if N == 2:
         print("Only two different values found.")
@@ -53,7 +61,7 @@ def form_cmap(vals):
         for i in range(1, N-1):
             frac = (1.0*i*(L-1))/(N-1)
             myclr = (frac/(L-1))
-            r_,g_,b_,a_ = cm.jet(myclr)
+            r_,g_,b_,a_ = cm.viridis(myclr)
             vtoc[vals[int(frac)]] = i
             dialog.setCustomColor(i,int(255*r_),int(255*g_),int(255*b_))
 
@@ -143,11 +151,16 @@ def get_param_quilt(category):
         return -0.2,-0.1,0.1,-0.25,0.0,0,0,0
     elif category == 2:
         return -0.59,0.2,0.1,-0.33,0.0,2,0,0
+    elif category == 3:
+        return 0.25,-0.3,0.2,0.3,0.0,1,0,0
 
 def get_img(hits, maxHits, H, W, p_H, p_W, which=1):
     global iscmap_formed
     if not iscmap_formed:
-        form_cmap(np.power(0.45,(1.0*hits.flatten())/maxHits))
+        if which==1:
+            form_cmap(np.power(0.45,(1.0*hits.flatten())/maxHits))
+        elif which == 2:
+            form_cmap(hits.flatten()/maxHits)
         iscmap_formed = True
     img = np.zeros((H,W,3),dtype=np.uint8)
     p_img = np.zeros((p_H,p_W,3),dtype=np.uint8)
@@ -160,7 +173,7 @@ def get_img(hits, maxHits, H, W, p_H, p_W, which=1):
     elif which==2:
         for i in range(p_H):
             for j in range(p_W):
-                r_,g_,b_ = dialog.customColor(vtoc[get_customcolor_ind(np.power(0.45,(1.0*hits[i,j])/maxHits), vtoc_keys)])
+                r_,g_,b_ = dialog.customColor(vtoc[get_customcolor_ind((1.0*hits[i,j])/maxHits, vtoc_keys)])
                 p_img[i,j,:] = (r_,g_,b_)
         for i in range(int(H/p_H)):
             for j in range(int(W/p_W)):
@@ -286,14 +299,16 @@ if __name__=="__main__":
     
     hits_list = []
     maxhits_list = []
-    maxHits = 0
+    maxHits_sum = 0
     for h_,m_ in hits_maxhits_list:
         hits_list.append(h_)
         maxhits_list.append(m_)
-        maxHits += m_
+        maxHits_sum += m_
     hits = hits_list[0]*maxhits_list[0]
     for i in range(1,N):
         hits += hits_list[i]*maxhits_list[i]
+    hits = (1.0*hits)/maxHits_sum
+    maxHits = np.max(hits)
 
     while True:
         h_mat = get_img(hits, maxHits, H, W, p_H, p_W, which)
