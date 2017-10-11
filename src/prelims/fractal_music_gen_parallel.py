@@ -8,6 +8,7 @@ import subprocess
 import os, sys
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
+import hashlib, xxhash
 
 from PyQt5 import QtCore, QtWidgets, QtGui
 
@@ -25,9 +26,12 @@ class ColorDialog(QtWidgets.QDialog):
         return self.widget.customCount()
     def setCustomColor(self,ind,r,g,b):
         self.widget.setCustomColor(ind,QtGui.QColor(r,g,b))
-    def customColor(self, ind):
-        mycol = self.widget.customColor(ind)
-        return (mycol.red(), mycol.green(), mycol.blue())
+    def customColor(self, ind1, ind2, w1, w2):
+        mycol1 = self.widget.customColor(ind1)
+        mycol2 = self.widget.customColor(ind2)
+        return (int((mycol1.red()*w1 + mycol2.red()*w2)/(w1+w2)),
+                int((mycol1.green()*w1 + mycol2.green()*w2)/(w1+w2)),
+                int((mycol1.blue()*w1 + mycol2.blue()*w2)/(w1+w2)))
 
 app = QtWidgets.QApplication(sys.argv)
 dialog = ColorDialog()
@@ -51,9 +55,9 @@ def form_cmap(vals):
     vtoc[0.] = 0
     vtoc[1.] = N-1
     assert N > 1, "No. of fracs must be greater than 1."
-    r_,g_,b_,a_ = cm.viridis(0)
+    r_,g_,b_,a_ = cm.hsv(0)
     dialog.setCustomColor(0,int(255*r_),int(255*g_),int(255*b_))
-    r_,g_,b_,a_ = cm.viridis(1)
+    r_,g_,b_,a_ = cm.hsv(1)
     dialog.setCustomColor(N-1,int(255*r_),int(255*g_),int(255*b_))
     if N == 2:
         print("Only two different values found.")
@@ -61,18 +65,18 @@ def form_cmap(vals):
         for i in range(1, N-1):
             frac = (1.0*i*(L-1))/(N-1)
             myclr = (frac/(L-1))
-            r_,g_,b_,a_ = cm.viridis(myclr)
+            r_,g_,b_,a_ = cm.hsv(myclr)
             vtoc[vals[int(frac)]] = i
             dialog.setCustomColor(i,int(255*r_),int(255*g_),int(255*b_))
 
 def get_customcolor_ind(val, vtoc_keys):
-    i = len(vtoc_keys)
+    i = len(vtoc_keys)-1
     while i > 0:
         if vtoc_keys[i-1] > val:
             i = i-1
         else:
             break
-    return vtoc_keys[i-1]
+    return vtoc_keys[i-1], vtoc_keys[i], val - vtoc_keys[i-1], vtoc_keys[i] - val
 
 
 def sym_icon_f(x,y,lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree):
@@ -153,6 +157,8 @@ def get_param_quilt(category):
         return -0.59,0.2,0.1,-0.33,0.0,2,0,0
     elif category == 3:
         return 0.25,-0.3,0.2,0.3,0.0,1,0,0
+    elif category == 4:
+        return -0.12,-0.36,0.18,-0.14,0.0,1,0.5,0.5
 
 def get_img(hits, maxHits, H, W, p_H, p_W, which=1):
     global iscmap_formed
@@ -173,7 +179,9 @@ def get_img(hits, maxHits, H, W, p_H, p_W, which=1):
     elif which==2:
         for i in range(p_H):
             for j in range(p_W):
-                r_,g_,b_ = dialog.customColor(vtoc[get_customcolor_ind((1.0*hits[i,j])/maxHits, vtoc_keys)])
+                myval = (1.0*hits[i,j])/maxHits
+                ind_prev, ind_next, w1, w2 = get_customcolor_ind(myval, vtoc_keys)
+                r_,g_,b_ = dialog.customColor(vtoc[ind_prev], vtoc[ind_next], w1, w2)
                 p_img[i,j,:] = (r_,g_,b_)
         for i in range(int(H/p_H)):
             for j in range(int(W/p_W)):
@@ -212,9 +220,52 @@ if __name__=="__main__":
                 'a4', 'a#4', 'b4', 'c5', 'c#5', 'd5', 'd#5', 'e5', 'f5', 'f#5', 'g5', 'g#5',
                 'a5', 'a#5', 'b5', 'c6', 'c#6', 'd6', 'd#6', 'e6', 'f6', 'f#6', 'g6', 'g#6',
                 'a6', 'a#6', 'b6', 'c7', 'c#7', 'd7', 'd#7', 'e7', 'f7', 'f#7', 'g7', 'g#7',
-                'a7', 'a#7', 'b7', 'c8']
+                'a7', 'a#7', 'b7']
 
     levels = ['', '*']
+
+    byte_to_note_map = {}
+    cnt = 0
+    max_byte_int = 0
+    #byte_to_note_map['00'] = 'c8'
+    #cnt += 1
+    for elem1 in ['a','b','c','d','e','f','g']:
+        for elem2 in ['','#']:
+            for elem3 in ['1','2','3','4','5','6','7']:
+                for elem4 in ['','*']:
+                    mynote = elem1+elem2+elem3+elem4
+                    mybyte = "%02x" % ord((cnt).to_bytes(1,'big'))
+                    byte_to_note_map[mybyte] = mynote
+                    cnt += 1
+    max_byte_int = cnt
+    while cnt <= 255:
+        mybyte = "%02x" % ord((cnt).to_bytes(1,'big'))
+        mybyte2 = "%02x" % ord((cnt%max_byte_int).to_bytes(1,'big'))
+        byte_to_note_map[mybyte] = byte_to_note_map[mybyte2]
+        cnt += 1
+
+    def get_hash(val):
+        # return hashlib.sha256(val).hexdigest()
+        return xxhash.xxh64(val).hexdigest()
+
+    def cluster_me(vals, prop=0.1):
+        vals_ = np.sort(vals.copy().flatten())
+        L = vals_.shape[0]
+        cl_of = {}
+        tot_prop = 0.
+        label = 0
+        while tot_prop < 1:
+            lb = int(tot_prop*L)
+            ub = np.min([L, int((tot_prop+prop)*L)])
+            for i in range(lb, ub):
+                cl_of[vals_[i]] = label
+            label += 1
+            tot_prop += prop
+        labels = np.zeros(vals.shape, dtype=np.uint8)
+        for i in range(vals.shape[0]):
+            for j in range(vals.shape[1]):
+                labels[i,j] = cl_of[vals[i,j]]
+        return labels
 
     def argument_parser():
         parser = argparse.ArgumentParser(description = 'description',
@@ -325,7 +376,8 @@ if __name__=="__main__":
         elif c == ord('z') or c == ord('q'):
             break
         elif c == ord('s'):
-            cv2.imwrite("fractal.png", h_mat.reshape((H,W,3)))
+            fname = str(args.category) + "_" + str(args.which) +  "_" + time.strftime("%d_%H_%M")
+            cv2.imwrite("images/"+fname+".png", h_mat.reshape((H,W,3)))
         elif c == ord('o'):
             offset -= 0.05*offMul
         elif c == ord('p'):
@@ -344,31 +396,28 @@ if __name__=="__main__":
             offMul*=10
         elif c == ord('r'):
             h_mat_ = h_mat.reshape((H,W,3))
-            # make audio
-            gs_mat = (.2126 * h_mat_[:,:,0] + .7152 * h_mat_[:,:,0] + .0722 * h_mat_[:,:,0]).astype(np.uint8)
-            min_gs = np.min(gs_mat, axis=1).reshape((H,1))
-            gs_mat -= min_gs
-            gs_mat_sort = np.sort(gs_mat, axis=1)
-
-            music_ = [[None]*W]*H
-            for i in range(H):
-                thresh1 = gs_mat_sort[i,int(W/3)]
-                thresh2 = gs_mat_sort[i,int((2*W)/3)]
-                for j in range(W):
-                    if gs_mat[i,j] < thresh1:
-                        pass
-                    elif gs_mat[i,j] < thresh2:
-                        music_[i][j] = (all_notes[i], 8)
-                    else:
-                        music_[i][j] = (all_notes[i]+'*', 8)
+            # # make audio
+            # gs_mat = (.2126 * h_mat_[:,:,0] + .7152 * h_mat_[:,:,0] + .0722 * h_mat_[:,:,0]).astype(np.uint8)
+            gs_mat = cluster_me(hits, 0.1)
+            # min_gs = np.min(gs_mat, axis=1).reshape((H,1))
+            # gs_mat -= min_gs
+            # gs_mat_sort = np.sort(gs_mat, axis=1)
             
             par_args = []
             for j in range(W):
+                myval = np.asarray(gs_mat[:,j], order='C')
+                myhash = get_hash(myval)
+                i = 0
                 temp = []
-                for i in range(H):
-                    if music_[i][j] is not None:
-                        temp.append(music_[i][j])
+                while i < len(myhash):
+                    temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
+                    i = i + 2
                 par_args.append((temp, True))
+            
+            # print("Notes")
+            # print(par_args)
+            # print("#"*50)
+            # input("Enter to continue...")
             
             t = time.time()
             with multiprocessing.Pool(processes=8) as pool:
