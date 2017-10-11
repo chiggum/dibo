@@ -404,15 +404,26 @@ if __name__=="__main__":
             # gs_mat_sort = np.sort(gs_mat, axis=1)
             
             par_args = []
-            for j in range(W):
-                myval = np.asarray(gs_mat[:,j], order='C')
-                myhash = get_hash(myval)
-                i = 0
-                temp = []
-                while i < len(myhash):
-                    temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
-                    i = i + 2
-                par_args.append((temp, True))
+            if which == 1:
+                for j in range(W):
+                    myval = np.asarray(gs_mat[:,j], order='C')
+                    myhash = get_hash(myval)
+                    i = 0
+                    temp = []
+                    while i < len(myhash):
+                        temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
+                        i = i + 2
+                    par_args.append((temp, True))
+            elif which == 2:
+                for j in range(W):
+                    myval = np.asarray(gs_mat[:,j%p_W], order='C')
+                    myhash = get_hash(myval)
+                    i = 0
+                    temp = []
+                    while i < len(myhash):
+                        temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
+                        i = i + 2
+                    par_args.append((temp, True))
             
             # print("Notes")
             # print(par_args)
@@ -444,5 +455,5 @@ if __name__=="__main__":
             subprocess.run(cmd)
 
             # remove unnecessary files
-            os.remove(fname+".avi")
-            os.remove(fname+".wav")
+            # os.remove(fname+".avi")
+            # os.remove(fname+".wav")
