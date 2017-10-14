@@ -13,7 +13,8 @@ A web app which converts images to audio.
 # TODOs
 
 - Add superimpose feature to pysynth_b.
-- Parallelize or improve time complexity of make_wav. [Done]
 - Mapping from an arbitrary-length array of integers to another fixed-length array of fixed-integers.
-- Make video of fractal music. [Done]
+    - Hasing is a possibility. But then bytes in Hashes must be mapped to keys so that the resulting sound is a melidoy.
+        - A database of piano music notes will help to make the assignment.
+        - Or a heuristic can be made using knowledge of piano keys.
 - Automatically generate a cmap that can best represent the icons/quilts.
