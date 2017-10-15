@@ -18,3 +18,4 @@ A web app which converts images to audio.
         - A database of piano music notes will help to make the assignment.
         - Or a heuristic can be made using knowledge of piano keys.
 - Automatically generate a cmap that can best represent the icons/quilts.
+- Implement the contractive function to plot fractals.
