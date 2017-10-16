@@ -19,3 +19,4 @@ A web app which converts images to audio.
         - Or a heuristic can be made using knowledge of piano keys.
 - Automatically generate a cmap that can best represent the icons/quilts.
 - Implement the contractive function to plot fractals.
+- Look into TDA for useful components.
