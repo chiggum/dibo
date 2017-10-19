@@ -123,6 +123,9 @@ def quilt_f(x,y,lmbda,alpha,beta,gamma,omega,m,v_x,v_y):
     y1 = np.modf(y1+1)[0]
     return (x1,y1)
 
+def fractal_f(x,y,a_11,a_12,a_21,a_22,b_1,b_2):
+    return (a_11*x+a_12*y+b_1, a_21*x+a_22*y+b_2)
+
 def hit_pixel(x, y, scaleH, scaleW, H, W, p_H, p_W, which=1):
     if which == 1:
         xp = np.uint(x*scaleW*W + W/2.0 + 0.5)
@@ -131,6 +134,10 @@ def hit_pixel(x, y, scaleH, scaleW, H, W, p_H, p_W, which=1):
     elif which == 2:
         xp = np.uint(x*p_W + 0.5)
         yp = np.uint(y*p_H + 0.5)
+        return (xp,yp)
+    elif which == 3:
+        xp = np.uint(x*W + 0.5)
+        yp = np.uint(y*H + 0.5)
         return (xp,yp)
 
 def get_param_icon(category):
@@ -160,12 +167,18 @@ def get_param_quilt(category):
     elif category == 4:
         return -0.12,-0.36,0.18,-0.14,0.0,1,0.5,0.5
 
+def get_param_fractal(category):
+    if category == 1:
+        return -0.1,0.35,0.2,0.5,0.5,0.4
+
 def get_img(hits, maxHits, H, W, p_H, p_W, which=1):
     global iscmap_formed
     if not iscmap_formed:
         if which==1:
-            form_cmap(np.power(0.45,(1.0*hits.flatten())/maxHits))
+            form_cmap(hits.flatten()/maxHits)
         elif which == 2:
+            form_cmap(hits.flatten()/maxHits)
+        elif which==3:
             form_cmap(hits.flatten()/maxHits)
         iscmap_formed = True
     img = np.zeros((H,W,3),dtype=np.uint8)
@@ -186,6 +199,13 @@ def get_img(hits, maxHits, H, W, p_H, p_W, which=1):
         for i in range(int(H/p_H)):
             for j in range(int(W/p_W)):
                 img[(p_H*i):(p_H*(i+1)),(p_W*j):(p_W*(j+1)),:] = p_img
+    elif which==3:
+        for i in range(H):
+            for j in range(W):
+                myval = (1.0*hits[i,j])/maxHits
+                ind_prev, ind_next, w1, w2 = get_customcolor_ind(myval, vtoc_keys)
+                r_,g_,b_ = dialog.customColor(vtoc[ind_prev], vtoc[ind_next], w1, w2)
+                img[i,j,:] = (r_,g_,b_)
     return img
 
 def iterate(x_init,y_init,category,
@@ -194,6 +214,8 @@ def iterate(x_init,y_init,category,
         lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree = get_param_icon(category)
     elif which == 2:
         lmbda,alpha,beta,gamma,omega,m,v_x,v_y = get_param_quilt(category)
+    elif which == 3:
+        a_11,a_12,a_21,a_22,b_1,b_2 = get_param_fractal(category)
     hits = np.zeros((H,W))
     maxHits = 1
     x_hit = x_init
@@ -203,10 +225,12 @@ def iterate(x_init,y_init,category,
             (x_hit, y_hit) = sym_icon_f(x_hit,y_hit,lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree)
         elif which == 2:
             (x_hit, y_hit) = quilt_f(x_hit,y_hit,lmbda,alpha,beta,gamma,omega,m,v_x,v_y)
+        elif which == 3:
+            (x_hit, y_hit) = fractal_f(x_hit,y_hit,a_11,a_12,a_21,a_22,b_1,b_2)
         #print(x_hit,y_hit)
         (xp,yp) = hit_pixel(x_hit, y_hit, scaleH, scaleW, H, W, p_H, p_W, which)
         #print(xp,yp)
-        if (which == 1 and xp < W and yp < H) or (which==2 and xp < p_W and yp < p_H):
+        if (which == 1 and xp < W and yp < H) or (which==2 and xp < p_W and yp < p_H) or (which == 3 and xp < W and yp < H):
             hits[yp,xp] += 1
             if hits[yp,xp] > maxHits:
                 maxHits = hits[yp,xp]
@@ -338,6 +362,11 @@ if __name__=="__main__":
             y_init_ = np.random.normal(0,1)
             x_init_ = np.modf(1+np.modf(x_init_)[0])[0]
             y_init_ = np.modf(1+np.modf(y_init_)[0])[0]
+        elif which==3:
+            x_init_ = np.random.normal(0,1)
+            y_init_ = np.random.normal(0,1)
+            x_init_ = np.modf(1+np.modf(x_init_)[0])[0]
+            y_init_ = np.modf(1+np.modf(y_init_)[0])[0]
         print(x_init_,y_init_)
         myargs.append((x_init_, y_init_, category,
                         scaleH, scaleW, H, W, p_H, p_W, n_iter, which))
@@ -417,6 +446,16 @@ if __name__=="__main__":
             elif which == 2:
                 for j in range(W):
                     myval = np.asarray(gs_mat[:,j%p_W], order='C')
+                    myhash = get_hash(myval)
+                    i = 0
+                    temp = []
+                    while i < len(myhash):
+                        temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
+                        i = i + 2
+                    par_args.append((temp, True))
+            elif which == 3:
+                for j in range(W):
+                    myval = np.asarray(gs_mat[:,j], order='C')
                     myhash = get_hash(myval)
                     i = 0
                     temp = []
