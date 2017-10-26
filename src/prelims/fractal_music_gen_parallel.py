@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import argparse
 import time
 import multiprocessing
 from pysynth import make_wav_par, make_wav_f
@@ -8,10 +7,13 @@ import subprocess
 import os, sys
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
-import hashlib, xxhash
-
 from PyQt5 import QtCore, QtWidgets, QtGui
+from utils import get_byte_to_note_map, get_hash, cluster_real_vals
+from argparser import argument_parser, parse_arguments
 
+"""
+Custom color box to change the palette color.
+"""
 class ColorDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,32 +35,25 @@ class ColorDialog(QtWidgets.QDialog):
                 int((mycol1.green()*w1 + mycol2.green()*w2)/(w1+w2)),
                 int((mycol1.blue()*w1 + mycol2.blue()*w2)/(w1+w2)))
 
-app = QtWidgets.QApplication(sys.argv)
-dialog = ColorDialog()
-dialog.show()
-
-vtoc = {}
-cmap_sz = dialog.customCount()
-iscmap_formed = False
-
-def form_cmap(vals):
-    # plt.hist(vals,bins=100)
-    # plt.show()
-    print("prev:",vals.shape[0])
+"""
+Form color pallette using some heurisitc.
+TODO: Find a better way to automatically
+make a color pallette which looks good
+when used in the image.
+"""
+def form_color_pallette(vals, args):
+    print("Total number of different hits values:",vals.shape[0])
     vals = np.sort(np.unique(vals))
     L = vals.shape[0]
-    print("next:",L)
-    # plt.hist(vals,bins=100)
-    # plt.show()
-
-    N = np.min([L, cmap_sz])
-    vtoc[0.] = 0
-    vtoc[1.] = N-1
+    print("Number of unique hits values:",L)
+    N = np.min([L, args.dialog.customCount()])
+    args.vtoc[0.] = 0
+    args.vtoc[1.] = N-1
     assert N > 1, "No. of fracs must be greater than 1."
     r_,g_,b_,a_ = cm.hsv(0)
-    dialog.setCustomColor(0,int(255*r_),int(255*g_),int(255*b_))
+    args.dialog.setCustomColor(0,int(255*r_),int(255*g_),int(255*b_))
     r_,g_,b_,a_ = cm.hsv(1)
-    dialog.setCustomColor(N-1,int(255*r_),int(255*g_),int(255*b_))
+    args.dialog.setCustomColor(N-1,int(255*r_),int(255*g_),int(255*b_))
     if N == 2:
         print("Only two different values found.")
     else:
@@ -66,9 +61,14 @@ def form_cmap(vals):
             frac = (1.0*i*(L-1))/(N-1)
             myclr = (frac/(L-1))
             r_,g_,b_,a_ = cm.hsv(myclr)
-            vtoc[vals[int(frac)]] = i
-            dialog.setCustomColor(i,int(255*r_),int(255*g_),int(255*b_))
+            args.vtoc[vals[int(frac)]] = i
+            args.dialog.setCustomColor(i,int(255*r_),int(255*g_),int(255*b_))
 
+"""
+Get index of custom color
+with fractional values to
+interpolate color.
+"""
 def get_customcolor_ind(val, vtoc_keys):
     i = len(vtoc_keys)-1
     while i > 0:
@@ -78,69 +78,11 @@ def get_customcolor_ind(val, vtoc_keys):
             break
     return vtoc_keys[i-1], vtoc_keys[i], val - vtoc_keys[i-1], vtoc_keys[i] - val
 
-
-def sym_icon_f(x,y,lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree):
-    zzbar = x**2+y**2
-    zzbarsqrt = np.sqrt(zzbar)
-    x1 = 1
-    y1 = 0
-    x2 = 1
-    y2 = 0
-    for i in range(ndegree-1):
-        x2 = x*x1 - y*y1
-        y2 = x*y1 + x1*y
-        x1 = x2
-        y1 = y2
-    
-    xbar1 = x1
-    ybar1 = -y1
-    x2 = x*x1 - y*y1
-    y2 = x*y1 + x1*y
-    x1 = x2
-    y1 = y2
-
-    x4 = 0
-    if delta != 0:
-        x3 = x/zzbarsqrt
-        y3 = y/zzbarsqrt
-        x4 = 1
-        y4 = 0
-        for i in range(ndegree*pdegree):
-            x2 = x3*x4 - y3*y4
-            y2 = x3*y4 + x4*y3
-            x4 = x2
-            y4 = y2
-    
-    a = lmbda + alpha*zzbar + beta*x1 + delta*x4*zzbarsqrt
-    return (a*x-omega*y+gamma*xbar1,a*y+omega*x+gamma*ybar1)
-
-def quilt_f(x,y,lmbda,alpha,beta,gamma,omega,m,v_x,v_y):
-    x1 = m*x + v_x + lmbda*np.sin(2*np.pi*x) + alpha*np.sin(2*np.pi*x)*np.cos(2*np.pi*y) + beta*np.sin(4*np.pi*x)+gamma*np.sin(6*np.pi*x)*np.cos(4*np.pi*y)
-    y1 = m*y + v_y + lmbda*np.sin(2*np.pi*y) + alpha*np.sin(2*np.pi*y)*np.cos(2*np.pi*x) + beta*np.sin(4*np.pi*y)+gamma*np.sin(6*np.pi*y)*np.cos(4*np.pi*x)
-    x1 = np.modf(x1)[0]
-    x1 = np.modf(x1+1)[0]
-    y1 = np.modf(y1)[0]
-    y1 = np.modf(y1+1)[0]
-    return (x1,y1)
-
-def fractal_f(x,y,a_11,a_12,a_21,a_22,b_1,b_2):
-    return (a_11*x+a_12*y+b_1, a_21*x+a_22*y+b_2)
-
-def hit_pixel(x, y, scaleH, scaleW, H, W, p_H, p_W, which=1):
-    if which == 1:
-        xp = np.uint(x*scaleW*W + W/2.0 + 0.5)
-        yp = np.uint(y*scaleH*H + H/2.0 + 0.5)
-        return (xp,yp)
-    elif which == 2:
-        xp = np.uint(x*p_W + 0.5)
-        yp = np.uint(y*p_H + 0.5)
-        return (xp,yp)
-    elif which == 3:
-        xp = np.uint(x*W + 0.5)
-        yp = np.uint(y*H + 0.5)
-        return (xp,yp)
-
-def get_param_icon(category):
+"""
+Symmetric icon parameters.
+"""
+def get_param_icon(args):
+    category = args.category
     if category == 1:
         return -2.08,1.0,-0.1,0.167,0.0,0.0,7,0
     elif category == 2:
@@ -157,7 +99,48 @@ def get_param_icon(category):
         return -2.05,3.0,-16.79,1.0,0.0,0.0,9,0
     return -2.08,1.0,-0.1,0.167,0.0,0.0,7,0
 
-def get_param_quilt(category):
+"""
+Symmetric icon recursive function.
+"""
+def sym_icon_f(x,y,args):
+    lmbda,alpha,beta,gamma,delta,\
+    omega,ndegree,pdegree = get_param_icon(args)
+    zzbar = x**2+y**2
+    zzbarsqrt = np.sqrt(zzbar)
+    x1 = 1
+    y1 = 0
+    x2 = 1
+    y2 = 0
+    for i in range(ndegree-1):
+        x2 = x*x1 - y*y1
+        y2 = x*y1 + x1*y
+        x1 = x2
+        y1 = y2
+    xbar1 = x1
+    ybar1 = -y1
+    x2 = x*x1 - y*y1
+    y2 = x*y1 + x1*y
+    x1 = x2
+    y1 = y2
+    x4 = 0
+    if delta != 0:
+        x3 = x/zzbarsqrt
+        y3 = y/zzbarsqrt
+        x4 = 1
+        y4 = 0
+        for i in range(ndegree*pdegree):
+            x2 = x3*x4 - y3*y4
+            y2 = x3*y4 + x4*y3
+            x4 = x2
+            y4 = y2
+    a = lmbda + alpha*zzbar + beta*x1 + delta*x4*zzbarsqrt
+    return (a*x-omega*y+gamma*xbar1,a*y+omega*x+gamma*ybar1)
+
+"""
+Quilt parameters.
+"""
+def get_param_quilt(args):
+    category = args.category
     if category == 1:
         return -0.2,-0.1,0.1,-0.25,0.0,0,0,0
     elif category == 2:
@@ -167,332 +150,244 @@ def get_param_quilt(category):
     elif category == 4:
         return -0.12,-0.36,0.18,-0.14,0.0,1,0.5,0.5
 
-def get_param_fractal(category):
+"""
+Quilt recursive function.
+"""
+def quilt_f(x,y,args):
+    lmbda,alpha,beta,gamma,omega,m,v_x,v_y = get_param_quilt(args)
+    x1 = m*x + v_x + lmbda*np.sin(2*np.pi*x) + alpha*np.sin(2*np.pi*x)*np.cos(2*np.pi*y) + beta*np.sin(4*np.pi*x)+gamma*np.sin(6*np.pi*x)*np.cos(4*np.pi*y)
+    y1 = m*y + v_y + lmbda*np.sin(2*np.pi*y) + alpha*np.sin(2*np.pi*y)*np.cos(2*np.pi*x) + beta*np.sin(4*np.pi*y)+gamma*np.sin(6*np.pi*y)*np.cos(4*np.pi*x)
+    x1 = np.modf(x1)[0]
+    x1 = np.modf(x1+1)[0]
+    y1 = np.modf(y1)[0]
+    y1 = np.modf(y1+1)[0]
+    return (x1,y1)
+
+"""
+Fractal parameters.
+"""
+def get_param_fractal(args):
+    category = args.category
     if category == 1:
         return -0.1,0.35,0.2,0.5,0.5,0.4
 
-def get_img(hits, maxHits, H, W, p_H, p_W, which=1):
-    global iscmap_formed
-    if not iscmap_formed:
-        if which==1:
-            form_cmap(hits.flatten()/maxHits)
-        elif which == 2:
-            form_cmap(hits.flatten()/maxHits)
-        elif which==3:
-            form_cmap(hits.flatten()/maxHits)
-        iscmap_formed = True
-    img = np.zeros((H,W,3),dtype=np.uint8)
-    p_img = np.zeros((p_H,p_W,3),dtype=np.uint8)
-    vtoc_keys = list(vtoc.keys())
-    if which==1:
-        for i in range(H):
-            for j in range(W):
-                r_,g_,b_ = dialog.customColor(vtoc[get_customcolor_ind(np.power(0.45,(1.0*hits[i,j])/maxHits), vtoc_keys)])
-                img[i,j,:] = (r_,g_,b_)
-    elif which==2:
-        for i in range(p_H):
-            for j in range(p_W):
-                myval = (1.0*hits[i,j])/maxHits
-                ind_prev, ind_next, w1, w2 = get_customcolor_ind(myval, vtoc_keys)
-                r_,g_,b_ = dialog.customColor(vtoc[ind_prev], vtoc[ind_next], w1, w2)
-                p_img[i,j,:] = (r_,g_,b_)
-        for i in range(int(H/p_H)):
-            for j in range(int(W/p_W)):
-                img[(p_H*i):(p_H*(i+1)),(p_W*j):(p_W*(j+1)),:] = p_img
-    elif which==3:
-        for i in range(H):
-            for j in range(W):
-                myval = (1.0*hits[i,j])/maxHits
-                ind_prev, ind_next, w1, w2 = get_customcolor_ind(myval, vtoc_keys)
-                r_,g_,b_ = dialog.customColor(vtoc[ind_prev], vtoc[ind_next], w1, w2)
-                img[i,j,:] = (r_,g_,b_)
-    return img
+"""
+Fractal recursive function.
+"""
+def fractal_f(x,y,args):
+    a_11,a_12,a_21,a_22,b_1,b_2 = get_param_fractal(args)
+    return (a_11*x+a_12*y+b_1, a_21*x+a_22*y+b_2)
 
-def iterate(x_init,y_init,category,
-            scaleH, scaleW, H, W, p_H, p_W, n_iter, which=1):
-    if which == 1:
-        lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree = get_param_icon(category)
-    elif which == 2:
-        lmbda,alpha,beta,gamma,omega,m,v_x,v_y = get_param_quilt(category)
-    elif which == 3:
-        a_11,a_12,a_21,a_22,b_1,b_2 = get_param_fractal(category)
-    hits = np.zeros((H,W))
-    maxHits = 1
+"""
+Hit this point.
+"""
+def hit_pixel(x,y,args):
+    if args.which == 1:
+        xp = np.uint(x*args.scale_width*args.width + args.width/2.0 + 0.5)
+        yp = np.uint(y*args.scale_height*args.height + args.height/2.0 + 0.5)
+        return (xp,yp)
+    elif args.which == 2:
+        xp = np.uint(x*args.patch_width + 0.5)
+        yp = np.uint(y*args.patch_height + 0.5)
+        return (xp,yp)
+    elif args.which == 3:
+        xp = np.uint(x*args.width + 0.5)
+        yp = np.uint(y*args.height + 0.5)
+        return (xp,yp)
+
+"""
+Computes hit map of pixels with the given
+initial points.
+"""
+def iterate(x_init,y_init, args):
+    hits = np.zeros((args.height, args.width))
+    max_hits = 1
     x_hit = x_init
     y_hit = y_init
-    for it in range(n_iter):
-        if which == 1:
-            (x_hit, y_hit) = sym_icon_f(x_hit,y_hit,lmbda,alpha,beta,gamma,delta,omega,ndegree,pdegree)
-        elif which == 2:
-            (x_hit, y_hit) = quilt_f(x_hit,y_hit,lmbda,alpha,beta,gamma,omega,m,v_x,v_y)
-        elif which == 3:
-            (x_hit, y_hit) = fractal_f(x_hit,y_hit,a_11,a_12,a_21,a_22,b_1,b_2)
-        #print(x_hit,y_hit)
-        (xp,yp) = hit_pixel(x_hit, y_hit, scaleH, scaleW, H, W, p_H, p_W, which)
-        #print(xp,yp)
-        if (which == 1 and xp < W and yp < H) or (which==2 and xp < p_W and yp < p_H) or (which == 3 and xp < W and yp < H):
+    for it in range(args.n_iter):
+        if args.which == 1:
+            (x_hit, y_hit) = sym_icon_f(x_hit,y_hit,args)
+        elif args.which == 2:
+            (x_hit, y_hit) = quilt_f(x_hit,y_hit,args)
+        elif args.which == 3:
+            (x_hit, y_hit) = fractal_f(x_hit,y_hit,args)
+        (xp,yp) = hit_pixel(x_hit, y_hit, args)
+        if (args.which == 1 and xp < args.width and yp < args.height)\
+             or (args.which == 2 and xp < args.patch_width and yp < args.height)\
+             or (args.which == 3 and xp < args.width and yp < args.height):
             hits[yp,xp] += 1
-            if hits[yp,xp] > maxHits:
-                maxHits = hits[yp,xp]
-    return (hits, maxHits)
+            if hits[yp,xp] > max_hits:
+                max_hits = hits[yp,xp]
+    return (hits, max_hits)
 
-if __name__=="__main__":
-    all_notes = ['c1', 'c#1', 'd1', 'd#1', 'e1', 'f1', 'f#1', 'g1', 'g#1', 
-                'a1', 'a#1', 'b1', 'c2', 'c#2', 'd2', 'd#2', 'e2', 'f2', 'f#2', 'g2', 'g#2',
-                'a2', 'a#2', 'b2', 'c3', 'c#3', 'd3', 'd#3', 'e3', 'f3', 'f#3', 'g3', 'g#3',
-                'a3', 'a#3', 'b3', 'c4', 'c#4', 'd4', 'd#4', 'e4', 'f4', 'f#4', 'g4', 'g#4',
-                'a4', 'a#4', 'b4', 'c5', 'c#5', 'd5', 'd#5', 'e5', 'f5', 'f#5', 'g5', 'g#5',
-                'a5', 'a#5', 'b5', 'c6', 'c#6', 'd6', 'd#6', 'e6', 'f6', 'f#6', 'g6', 'g#6',
-                'a6', 'a#6', 'b6', 'c7', 'c#7', 'd7', 'd#7', 'e7', 'f7', 'f#7', 'g7', 'g#7',
-                'a7', 'a#7', 'b7']
+"""
+Get a colorful image using hits map
+of pixels and some color pallette.
+"""
+def get_img(hits, maxHits, args):
+    if not args.is_color_pallette_formed:
+        form_color_pallette(hits.flatten()/maxHits, args)
+        args.is_color_pallette_formed = True
+    else:
+        print("Color pallette already formed.")
+    img = np.zeros((args.height, args.width, 3),dtype=np.uint8)
+    if args.which == 2:
+        patch_img = np.zeros((args.patch_height,args.patch_width,3),dtype=np.uint8)
+    vtoc_keys = list(args.vtoc.keys())
+    if args.which == 1:
+        height_ = args.height
+        width_ = args.width
+    elif args.which == 2:
+        height_ = args.patch_height
+        width_ = args.patch_width
+    elif args.which == 3:
+        height_ = args.height
+        width_ = args.width
+    for i in range(args.patch_height):
+        for j in range(args.patch_width):
+            myval = (1.0*hits[i,j])/maxHits
+            ind_prev, ind_next, w1, w2 = get_customcolor_ind(myval, vtoc_keys)
+            r_,g_,b_ = args.dialog.customColor(args.vtoc[ind_prev], args.vtoc[ind_next], w1, w2)
+            if args.which == 1:
+                img[i,j,:] = (r_,g_,b_)
+            elif args.which == 2:
+                patch_img[i,j,:] = (r_,g_,b_)
+            elif args.which == 3:
+                img[i,j,:] = (r_,g_,b_)
+    if args.which == 2:
+        for i in range(int(args.height/args.patch_height)):
+            for j in range(int(args.width/args.patch_width)):
+                img[(args.patch_height*i):(args.patch_height*(i+1)),(args.patch_width*j):(args.patch_width*(j+1)),:] = patch_img
+    return img
 
-    levels = ['', '*']
+"""
+Makes audio using pysynth and video
+frames using opencv and pastes two
+using ffmpeg to a file.
+"""
+def make_video(img, hits, byte_to_note_map, args):
+    print("Making video...")
+    print("#"*50)
+    # make audio using pysynth
+    hit_labels = cluster_real_vals(hits, args.cluster_prop)
+    # prepare arguments for
+    # parallel execution
+    par_args = []
+    for j in range(args.width):
+        if args.which == 2:
+            myval = np.asarray(hit_labels[:,j%args.patch_width], order='C')
+        else:
+            myval = np.asarray(hit_labels[:,j], order='C')
+        myhash = get_hash(myval)
+        i = 0
+        temp = []
+        while i < len(myhash):
+            temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
+            i = i + 2
+        par_args.append((temp, True))
+    t = time.time()
+    # go parallel
+    with multiprocessing.Pool(processes=args.num_proc) as pool:
+        ilist = pool.starmap(make_wav_par, par_args)
+    print("Intensity lists prepared. Took", time.time()-t)
+    t = time.time()
+    fname = str(args.category) + "_" +\
+            str(args.which) +  "_" +\
+            time.strftime("%d_%H_%M")
+    make_wav_f(fname + ".wav", ilist)
+    print("Audio prepared. Took", time.time()-t)
+    # make video using opencv
+    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    # because audio is 4 fps
+    out = cv2.VideoWriter(fname + ".avi", fourcc, 4.0, (args.width, args.height)) 
+    for j in range(args.width):
+        frame = img.copy()
+        # invert jth line to indicate 
+        # the pixels producing sound
+        frame[:,j,:] = 255 - frame[:,j,:]
+        out.write(frame)
+    out.release()
+    ## paste audio + video using ffmpeg
+    cmd = args.ffmpeg_exe_path + " -i " + \
+            fname + ".avi -i " + fname + \
+            ".wav -c copy videos/" + fname + ".mkv"
+    subprocess.run(cmd)
+    # remove unnecessary files
+    os.remove(fname+".avi")
+    os.remove(fname+".wav")
 
-    byte_to_note_map = {}
-    cnt = 0
-    max_byte_int = 0
-    #byte_to_note_map['00'] = 'c8'
-    #cnt += 1
-    for elem1 in ['a','b','c','d','e','f','g']:
-        for elem2 in ['','#']:
-            for elem3 in ['1','2','3','4','5','6','7']:
-                for elem4 in ['','*']:
-                    mynote = elem1+elem2+elem3+elem4
-                    mybyte = "%02x" % ord((cnt).to_bytes(1,'big'))
-                    byte_to_note_map[mybyte] = mynote
-                    cnt += 1
-    max_byte_int = cnt
-    while cnt <= 255:
-        mybyte = "%02x" % ord((cnt).to_bytes(1,'big'))
-        mybyte2 = "%02x" % ord((cnt%max_byte_int).to_bytes(1,'big'))
-        byte_to_note_map[mybyte] = byte_to_note_map[mybyte2]
-        cnt += 1
-
-    def get_hash(val):
-        # return hashlib.sha256(val).hexdigest()
-        return xxhash.xxh64(val).hexdigest()
-
-    def cluster_me(vals, prop=0.1):
-        vals_ = np.sort(vals.copy().flatten())
-        L = vals_.shape[0]
-        cl_of = {}
-        tot_prop = 0.
-        label = 0
-        while tot_prop < 1:
-            lb = int(tot_prop*L)
-            ub = np.min([L, int((tot_prop+prop)*L)])
-            for i in range(lb, ub):
-                cl_of[vals_[i]] = label
-            label += 1
-            tot_prop += prop
-        labels = np.zeros(vals.shape, dtype=np.uint8)
-        for i in range(vals.shape[0]):
-            for j in range(vals.shape[1]):
-                labels[i,j] = cl_of[vals[i,j]]
-        return labels
-
-    def argument_parser():
-        parser = argparse.ArgumentParser(description = 'description',
-                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        parser.add_argument('-height', '--height', type=int,
-                            help="Height of image",
-                            default=len(all_notes))
-        parser.add_argument('-width', '--width', type=int,
-                            help="Width of image.",
-                            required=True)
-        parser.add_argument('-ph', '--patch_height', type=int,
-                            help="Height of a patch",
-                            default=30)
-        parser.add_argument('-pw', '--patch_width', type=int,
-                            help="Width of a patch.",
-                            default=30)
-        parser.add_argument('-c', '--category', type=int,
-                            help="Category of set.",
-                            default=1)
-        parser.add_argument('-wh', '--which', type=int,
-                            help="icon[1]/quit[2]",
-                            default=1)
-        parser.add_argument('-f', '--ffmpeg_exe_path', type=str,
-                            help="Category of set.",
-                            default="G:/packages/ffmpeg/bin/ffmpeg.exe")
-        parser.add_argument('-ni', '--n_iter', type=int,
-                            help="No. of iterations.",
-                            default=500000)
-        parser.add_argument('-sh', '--scaleH', type=float,
-                            help="scaleH.",
-                            default=0.37)
-        parser.add_argument('-sw', '--scaleW', type=float,
-                            help="scaleW.",
-                            default=0.37)
-        parser.add_argument('-xi', '--x_init', type=float,
-                            help="x_init.",
-                            default=0.001)
-        parser.add_argument('-yi', '--y_init', type=float,
-                            help="y_init.",
-                            default=0.002)
-        return parser
-
-    def parse_arguments(raw=None):
-        args = argument_parser().parse_args(raw)
-        return args
-
-    args = parse_arguments()
-    H = args.height
-    # W = H   # Currently only supports square images
-    W = args.width
-    category = args.category
-    scaleH = args.scaleH
-    scaleW = args.scaleW
-    n_iter = args.n_iter
-    x_init = args.x_init
-    y_init = args.y_init
-    which = args.which
-    p_H = args.patch_height
-    p_W = args.patch_width
+"""
+Computes the hits map of pixels by calling iterate
+over several initial points (=args.num_proc)
+and aggregate results to get final hits 
+map and max number of hits
+"""
+def get_hits_map(args):
+    print("Computing hits map...")
+    print("#"*50)
+    par_args = []
+    for i in range(args.num_proc):
+        if args.which == 1:
+            x_init_ = args.x_init + np.random.normal(0,0.1)
+            y_init_ = args.y_init + np.random.normal(0,0.1)
+        elif args.which == 2:
+            x_init_ = np.modf(1+np.modf(np.random.normal(0,1))[0])[0]
+            y_init_ = np.modf(1+np.modf(np.random.normal(0,1))[0])[0]
+        elif args.which == 3:
+            x_init_ = np.modf(1+np.modf(np.random.normal(0,1))[0])[0]
+            y_init_ = np.modf(1+np.modf(np.random.normal(0,1))[0])[0]
+        par_args.append((x_init_, y_init_, args))
     
-    np.random.seed(2)
-    N = 16
-    myargs = []
-    for i in range(N):
-        if which==1:
-            x_init_ = x_init + np.random.normal(0,0.1)
-            y_init_ = y_init + np.random.normal(0,0.1)
-        elif which==2:
-            x_init_ = np.random.normal(0,1)
-            y_init_ = np.random.normal(0,1)
-            x_init_ = np.modf(1+np.modf(x_init_)[0])[0]
-            y_init_ = np.modf(1+np.modf(y_init_)[0])[0]
-        elif which==3:
-            x_init_ = np.random.normal(0,1)
-            y_init_ = np.random.normal(0,1)
-            x_init_ = np.modf(1+np.modf(x_init_)[0])[0]
-            y_init_ = np.modf(1+np.modf(y_init_)[0])[0]
-        print(x_init_,y_init_)
-        myargs.append((x_init_, y_init_, category,
-                        scaleH, scaleW, H, W, p_H, p_W, n_iter, which))
-    
-    with multiprocessing.Pool(processes=N) as pool:
-        hits_maxhits_list = pool.starmap(iterate, myargs)
-    # hits_,maxHits_ = iterate(x_init, y_init, category,
-    #                     scaleH, scaleW, H, W, n_iter, which)
-    # hits_maxhits_list = [(hits_,maxHits_)]
-    
+    # for parallel execution
+    with multiprocessing.Pool(processes=args.num_proc) as pool:
+        hits_maxhits_list = pool.starmap(iterate, par_args)
+    # for sequential execution
+    """
+    hits_maxhits_list = []
+    for i in range(args.num_proc):
+        hits_, max_hits_ = iterate(par_args[i][0], par_args[i][1], args)
+        hits_maxhits_list.append((hits_, max_hits_))
+    """    
+    # aggregate hits and max_hits
     hits_list = []
+    max_hits_sum = 0
     maxhits_list = []
-    maxHits_sum = 0
     for h_,m_ in hits_maxhits_list:
         hits_list.append(h_)
         maxhits_list.append(m_)
-        maxHits_sum += m_
+        max_hits_sum += m_
     hits = hits_list[0]*maxhits_list[0]
-    for i in range(1,N):
+    for i in range(1,args.num_proc):
         hits += hits_list[i]*maxhits_list[i]
-    hits = (1.0*hits)/maxHits_sum
-    maxHits = np.max(hits)
+    hits = (1.0*hits)/max_hits_sum
+    max_hits = np.max(hits)
+    return hits, max_hits
+            
+if __name__=="__main__":
+    args = parse_arguments()
+
+    hits, max_hits = get_hits_map(args)
+
+    args.is_color_pallette_formed = False
+    app = QtWidgets.QApplication(sys.argv)
+    args.dialog = ColorDialog()
+    args.vtoc = {}
+    args.dialog.show()
 
     while True:
-        h_mat = get_img(hits, maxHits, H, W, p_H, p_W, which)
-        cv2.imshow("fractal", h_mat.reshape((H,W,3)))
+        # get a colorful image of 
+        # fractal/icon/quilt from hits
+        img = get_img(hits, max_hits, args)
+        cv2.imshow("fractal", img)
+        # wait for user to press key
         c = cv2.waitKey(0)
-        if c == ord('f'):
-            iReal-=realOffset
-        elif c == ord('g'):
-            iReal+=realOffset
-        elif c == ord('v'):
-            iImg -= imgOffset
-        elif c == ord('b'):
-            iImg += imgOffset
-        elif c == ord('z') or c == ord('q'):
+        if c == ord('z') or c == ord('q'):  # exit
             break
-        elif c == ord('s'):
-            fname = str(args.category) + "_" + str(args.which) +  "_" + time.strftime("%d_%H_%M")
-            cv2.imwrite("images/"+fname+".png", h_mat.reshape((H,W,3)))
-        elif c == ord('o'):
-            offset -= 0.05*offMul
-        elif c == ord('p'):
-            offset += 0.05*offMul
-        elif c == ord('k'):
-            realMin -= 0.05*offMul
-        elif c == ord('l'):
-            realMin += 0.05*offMul
-        elif c == ord('n'):
-            imgMin -= 0.05*offMul
-        elif c == ord('m'):
-            imgMin += 0.05*offMul
-        elif c == ord('u'):
-            offMul/=10
-        elif c == ord('i'):
-            offMul*=10
-        elif c == ord('r'):
-            h_mat_ = h_mat.reshape((H,W,3))
-            # # make audio
-            # gs_mat = (.2126 * h_mat_[:,:,0] + .7152 * h_mat_[:,:,0] + .0722 * h_mat_[:,:,0]).astype(np.uint8)
-            gs_mat = cluster_me(hits, 0.1)
-            # min_gs = np.min(gs_mat, axis=1).reshape((H,1))
-            # gs_mat -= min_gs
-            # gs_mat_sort = np.sort(gs_mat, axis=1)
-            
-            par_args = []
-            if which == 1:
-                for j in range(W):
-                    myval = np.asarray(gs_mat[:,j], order='C')
-                    myhash = get_hash(myval)
-                    i = 0
-                    temp = []
-                    while i < len(myhash):
-                        temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
-                        i = i + 2
-                    par_args.append((temp, True))
-            elif which == 2:
-                for j in range(W):
-                    myval = np.asarray(gs_mat[:,j%p_W], order='C')
-                    myhash = get_hash(myval)
-                    i = 0
-                    temp = []
-                    while i < len(myhash):
-                        temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
-                        i = i + 2
-                    par_args.append((temp, True))
-            elif which == 3:
-                for j in range(W):
-                    myval = np.asarray(gs_mat[:,j], order='C')
-                    myhash = get_hash(myval)
-                    i = 0
-                    temp = []
-                    while i < len(myhash):
-                        temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
-                        i = i + 2
-                    par_args.append((temp, True))
-            
-            # print("Notes")
-            # print(par_args)
-            # print("#"*50)
-            # input("Enter to continue...")
-            
-            t = time.time()
-            with multiprocessing.Pool(processes=8) as pool:
-                intensity_list_list = pool.starmap(make_wav_par, par_args)
-
-            print("intensity lists prepared")
-            print("Took", time.time()-t)
-            t = time.time()
-            fname = str(args.category) + "_" + str(args.which) +  "_" + time.strftime("%d_%H_%M")
-            make_wav_f(fname + ".wav", intensity_list_list)
-            print("Took", time.time()-t)
-
-            # make video
-            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            out = cv2.VideoWriter(fname + ".avi", fourcc, 4.0, (W,H))
-            for j in range(W):
-                frame = h_mat_.copy()
-                frame[:,j,:] = 255 - frame[:,j,:]
-                out.write(frame)
-            out.release()
-
-            ## Use ffmpeg.exe -i audio_file -i video_file -c copy output.mkv
-            cmd = args.ffmpeg_exe_path + " -i " + fname + ".avi -i " + fname + ".wav -c copy videos/" + fname + ".mkv"
-            subprocess.run(cmd)
-
-            # remove unnecessary files
-            # os.remove(fname+".avi")
-            # os.remove(fname+".wav")
+        elif c == ord('s'): # save image
+            fname = str(args.category) + "_" + \
+                    str(args.which) +  "_" + \
+                    time.strftime("%d_%H_%M")
+            cv2.imwrite("images/"+fname+".png", img)
+        elif c == ord('r'): # make video
+            byte_to_note_map = get_byte_to_note_map() 
+            make_video(img, hits, byte_to_note_map, args)
