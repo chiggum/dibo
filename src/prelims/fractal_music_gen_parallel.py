@@ -200,7 +200,12 @@ Computes hit map of pixels with the given
 initial points.
 """
 def iterate(x_init,y_init, args):
-    hits = np.zeros((args.height, args.width))
+    if args.which == 1:
+        hits = np.zeros((args.height, args.width))
+    elif args.which == 2:
+        hits = np.zeros((args.patch_height, args.patch_width))
+    elif args.which == 3:
+        hits = np.zeros((args.height, args.width))
     max_hits = 1
     x_hit = x_init
     y_hit = y_init
@@ -213,7 +218,7 @@ def iterate(x_init,y_init, args):
             (x_hit, y_hit) = fractal_f(x_hit,y_hit,args)
         (xp,yp) = hit_pixel(x_hit, y_hit, args)
         if (args.which == 1 and xp < args.width and yp < args.height)\
-             or (args.which == 2 and xp < args.patch_width and yp < args.height)\
+             or (args.which == 2 and xp < args.patch_width and yp < args.patch_height)\
              or (args.which == 3 and xp < args.width and yp < args.height):
             hits[yp,xp] += 1
             if hits[yp,xp] > max_hits:
@@ -243,8 +248,8 @@ def get_img(hits, maxHits, args):
     elif args.which == 3:
         height_ = args.height
         width_ = args.width
-    for i in range(args.patch_height):
-        for j in range(args.patch_width):
+    for i in range(height_):
+        for j in range(width_):
             myval = (1.0*hits[i,j])/maxHits
             ind_prev, ind_next, w1, w2 = get_customcolor_ind(myval, vtoc_keys)
             r_,g_,b_ = args.dialog.customColor(args.vtoc[ind_prev], args.vtoc[ind_next], w1, w2)
@@ -367,6 +372,9 @@ if __name__=="__main__":
     args = parse_arguments()
 
     hits, max_hits = get_hits_map(args)
+
+    # plt.imshow(hits, cmap='jet')
+    # plt.show()
 
     args.is_color_pallette_formed = False
     app = QtWidgets.QApplication(sys.argv)
