@@ -1,4 +1,5 @@
 import numpy as np
+import cv2
 
 """
 Symmetric icon parameters.
@@ -131,6 +132,11 @@ def iterate(x_init,y_init, args):
     max_hits = 1
     x_hit = x_init
     y_hit = y_init
+
+    rand_hits = np.arange(256*256*256)
+    np.random.shuffle(rand_hits)
+    print("shuffled.")
+
     for it in range(args.n_iter):
         if args.which == 1:
             (x_hit, y_hit) = sym_icon_f(x_hit,y_hit,args)
@@ -145,4 +151,14 @@ def iterate(x_init,y_init, args):
             hits[yp,xp] += 1
             if hits[yp,xp] > max_hits:
                 max_hits = hits[yp,xp]
+        if not args.parallel_hits_map and args.iter_freq_show and it%args.iter_freq_show == 0:
+            col_img_to_show = np.zeros((hits.shape[0], hits.shape[1], 3), dtype=np.uint8)
+            hits_ = hits.copy().astype(np.int)
+            #print(np.max(hits_))
+            hits_ = rand_hits[hits_]
+            col_img_to_show[:,:,0] = hits_%256
+            col_img_to_show[:,:,1] = ((hits_-col_img_to_show[:,:,0])/256)%256
+            col_img_to_show[:,:,2] = (hits_ - col_img_to_show[:,:,1]*256 - col_img_to_show[:,:,0])/(256*256)
+            cv2.imshow("dynamic_fractal", col_img_to_show)
+            cv2.waitKey(1)
     return (hits, max_hits)

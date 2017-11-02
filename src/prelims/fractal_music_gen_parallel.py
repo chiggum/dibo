@@ -12,6 +12,7 @@ from argparser import argument_parser, parse_arguments
 from PyQt5 import QtWidgets
 from color_dialog import ColorDialog, form_color_pallette, get_customcolor_ind
 from pattern_gen import iterate
+from seq_to_notes_mapper import get_category_sequence, map_category_sequence_to_notes
 
 """
 Get a colorful image using hits map
@@ -62,21 +63,27 @@ def make_video(img, hits, byte_to_note_map, args):
     print("Making video...")
     print("#"*50)
     # make audio using pysynth
-    hit_labels = cluster_real_vals(hits, args.cluster_prop)
+    # hit_labels = cluster_real_vals(hits, args.cluster_prop)
+    hit_labels = get_category_sequence(hits)
+    notes_seq = map_category_sequence_to_notes(hit_labels)
     # prepare arguments for
     # parallel execution
     par_args = []
     for j in range(args.width):
         if args.which == 2:
-            myval = np.asarray(hit_labels[:,j%args.patch_width], order='C')
+            #myval = np.asarray(hit_labels[:,j%args.patch_width], order='C')
+            myval = notes_seq[:,j%args.patch_width]
         else:
-            myval = np.asarray(hit_labels[:,j], order='C')
-        myhash = get_hash(myval)
+            #myval = np.asarray(hit_labels[:,j], order='C')
+            myval = notes_seq[:,j]
+        #myhash = get_hash(myval)
         i = 0
         temp = []
-        while i < len(myhash):
-            temp.append((byte_to_note_map[myhash[i:(i+2)]], 8))
-            i = i + 2
+        #while i < len(myhash):
+        while i < myval.shape[0]:
+            if myval[i] is not None:
+                temp.append((myval[i], 8))
+            i = i + 1
         par_args.append((temp, True))
     t = time.time()
     # go parallel
@@ -132,15 +139,16 @@ def get_hits_map(args):
         par_args.append((x_init_, y_init_, args))
     
     # for parallel execution
-    with multiprocessing.Pool(processes=args.num_proc) as pool:
-        hits_maxhits_list = pool.starmap(iterate, par_args)
+    if args.parallel_hits_map:
+        with multiprocessing.Pool(processes=args.num_proc) as pool:
+            hits_maxhits_list = pool.starmap(iterate, par_args)
     # for sequential execution
-    """
-    hits_maxhits_list = []
-    for i in range(args.num_proc):
-        hits_, max_hits_ = iterate(par_args[i][0], par_args[i][1], args)
-        hits_maxhits_list.append((hits_, max_hits_))
-    """    
+    else:
+        hits_maxhits_list = []
+        for i in range(args.num_proc):
+            hits_, max_hits_ = iterate(par_args[i][0], par_args[i][1], args)
+            hits_maxhits_list.append((hits_, max_hits_))
+       
     # aggregate hits and max_hits
     hits_list = []
     max_hits_sum = 0

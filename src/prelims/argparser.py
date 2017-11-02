@@ -24,6 +24,12 @@ def argument_parser():
     parser.add_argument('-num_proc', '--num_proc', type=int,
                         help="num of processes",
                         default=16)
+    parser.add_argument('-iter_freq_show', '--iter_freq_show', type=int,
+                        help="iterations image show frequency",
+                        default=0)
+    parser.add_argument('-parallel_hits_map', '--parallel_hits_map', type=int,
+                        help="To compute hits map in parallel or sequential",
+                        default=1)
     parser.add_argument('-ffmpeg_exe_path', '--ffmpeg_exe_path', type=str,
                         help="Category of set.",
                         default="G:/packages/ffmpeg/bin/ffmpeg.exe")
