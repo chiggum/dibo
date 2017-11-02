@@ -63,25 +63,24 @@ def make_video(img, hits, byte_to_note_map, args):
     print("Making video...")
     print("#"*50)
     # make audio using pysynth
-    # hit_labels = cluster_real_vals(hits, args.cluster_prop)
     hit_labels = get_category_sequence(hits)
-    notes_seq = map_category_sequence_to_notes(hit_labels)
+    notes_seq = map_category_sequence_to_notes(hit_labels, args.map_type)
     # prepare arguments for
     # parallel execution
     par_args = []
-    for j in range(args.width):
+    if args.map_type == 0:
+        music_length = args.width
+    elif args.map_type == 1:
+        music_length = len(notes_seq)
+    for j in range(music_length):
         if args.which == 2:
-            #myval = np.asarray(hit_labels[:,j%args.patch_width], order='C')
-            myval = notes_seq[:,j%args.patch_width]
+            myval = notes_seq[j%args.patch_width]
         else:
-            #myval = np.asarray(hit_labels[:,j], order='C')
-            myval = notes_seq[:,j]
-        #myhash = get_hash(myval)
+            myval = notes_seq[j]
         i = 0
         temp = []
-        #while i < len(myhash):
-        while i < myval.shape[0]:
-            if myval[i] is not None:
+        while i < len(myval):
+            if myval[i] != '':
                 temp.append((myval[i], 8))
             i = i + 1
         par_args.append((temp, True))
@@ -99,13 +98,28 @@ def make_video(img, hits, byte_to_note_map, args):
     # make video using opencv
     fourcc = cv2.VideoWriter_fourcc(*'MJPG')
     # because audio is 4 fps
-    out = cv2.VideoWriter(fname + ".avi", fourcc, 4.0, (args.width, args.height)) 
-    for j in range(args.width):
-        frame = img.copy()
-        # invert jth line to indicate 
-        # the pixels producing sound
-        frame[:,j,:] = 255 - frame[:,j,:]
-        out.write(frame)
+    out = cv2.VideoWriter(fname + ".avi", fourcc, 4.0, (args.width, args.height))
+    if args.map_type == 0:
+        for j in range(args.width):
+            frame = img.copy()
+            # invert jth line to indicate 
+            # the pixels producing sound
+            frame[:,j,:] = 255 - frame[:,j,:]
+            out.write(frame)
+    elif args.map_type == 1:
+        max_degrees = 360
+        centre_h = args.height/2
+        centre_w = args.width/2
+        for theta in range(max_degrees):
+            frame = img.copy()
+            (i_, j_) = centre_h, centre_w
+            radius = 0
+            while i_ >= 0 and i_ < args.height and j_ >= 0 and j_ < args.width:
+                frame[int(i_),int(j_),:] = 255 - frame[int(i_),int(j_),:]
+                radius += 1
+                i_ = i_ + np.cos(theta*np.pi/180.)
+                j_ = j_ + np.sin(theta*np.pi/180.)
+            out.write(frame)
     out.release()
     ## paste audio + video using ffmpeg
     cmd = args.ffmpeg_exe_path + " -i " + \

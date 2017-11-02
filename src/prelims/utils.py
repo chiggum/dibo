@@ -10,7 +10,7 @@ all_notes = ['c1', 'c#1', 'd1', 'd#1', 'e1', 'f1', 'f#1', 'g1', 'g#1',
                 'a6', 'a#6', 'b6', 'c7', 'c#7', 'd7', 'd#7', 'e7', 'f7', 'f#7', 'g7', 'g#7',
                 'a7', 'a#7', 'b7']
 
-levels = ['', '*']
+levels = ['', '']
 
 """
 Map each byte to a note. Currently, bytes are mapped

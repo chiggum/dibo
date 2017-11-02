@@ -133,9 +133,10 @@ def iterate(x_init,y_init, args):
     x_hit = x_init
     y_hit = y_init
 
-    rand_hits = np.arange(256*256*256)
-    np.random.shuffle(rand_hits)
-    print("shuffled.")
+    if not args.parallel_hits_map and args.iter_freq_show:
+        rand_hits = np.arange(256*256*256)
+        np.random.shuffle(rand_hits)
+        print("shuffled.")
 
     for it in range(args.n_iter):
         if args.which == 1:

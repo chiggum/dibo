@@ -21,6 +21,9 @@ def argument_parser():
     parser.add_argument('-which', '--which', type=int,
                         help="icon[1]/quit[2]",
                         default=1)
+    parser.add_argument('-map_type', '--map_type', type=int,
+                        help="0/1",
+                        default=0)
     parser.add_argument('-num_proc', '--num_proc', type=int,
                         help="num of processes",
                         default=16)
