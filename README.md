@@ -1,5 +1,5 @@
 # dibo
-A web app which converts images to audio.
+Acoustic representation of fractals
 
 # Preliminaries
 
